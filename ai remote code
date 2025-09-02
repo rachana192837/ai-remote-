@@ -1,0 +1,71 @@
+import cv2
+import mediapipe as mp
+import sounddevice as sd
+import numpy as np
+import pyautogui
+import threading
+import time
+
+# ------------------ CLAP DETECTION ------------------
+def clap_listener(threshold=500, cooldown=1):
+    """
+    Continuously listens for claps.
+    If clap detected -> press SPACE (play/pause).
+    """
+    last_clap = 0
+    while True:
+        audio = sd.rec(int(0.2 * 44100), samplerate=44100, channels=1, dtype='int16')
+        sd.wait()
+        volume_norm = np.linalg.norm(audio)
+
+        if volume_norm > threshold and (time.time() - last_clap > cooldown):
+            print("👏 Clap detected → Toggle Play/Pause")
+            pyautogui.press('space')
+            last_clap = time.time()
+
+
+# ------------------ HAND GESTURE DETECTION ------------------
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(min_detection_confidence=0.7)
+mp_draw = mp.solutions.drawing_utils
+
+def hand_listener():
+    cap = cv2.VideoCapture(0)
+    while cap.isOpened():
+        success, img = cap.read()
+        if not success:
+            break
+
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        results = hands.process(img_rgb)
+
+        if results.multi_hand_landmarks:
+            for handLms in results.multi_hand_landmarks:
+                h, w, _ = img.shape
+                cx = int(handLms.landmark[9].x * w)  # Palm center approx
+
+                if cx < w // 3:
+                    print("👈 Hand Left → Backward 5s")
+                    pyautogui.press('left')
+                    time.sleep(1)  # avoid multiple triggers
+                elif cx > 2 * w // 3:
+                    print("👉 Hand Right → Forward 5s")
+                    pyautogui.press('right')
+                    time.sleep(1)
+
+                mp_draw.draw_landmarks(img, handLms, mp_hands.HAND_CONNECTIONS)
+
+        cv2.imshow("Hand Control", img)
+        if cv2.waitKey(1) & 0xFF == 27:  # ESC to exit
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+# ------------------ RUN BOTH LISTENERS ------------------
+if __name__ == "__main__":
+    # Run clap listener in background
+    threading.Thread(target=clap_listener, daemon=True).start()
+    # Run hand gesture listener (main thread)
+    hand_listener()
